@@ -3,8 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  // Emulator → 10.0.2.2 | Physical device → your PC's WiFi IP e.g. 192.168.1.5
-  static const String _base = 'https://fuelsense-backend.onrender.com/api';
+static const String _base = 'http://localhost:8000/api';
 
   // ── Token storage ──────────────────────────────────────────────────────────
   static Future<String?> getToken() async => (await SharedPreferences.getInstance()).getString('token');
