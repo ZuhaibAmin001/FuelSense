@@ -21,4 +21,7 @@ urlpatterns = [
     # Owner Dashboard
     path("dashboard/<int:station_id>/overview/",        views.dashboard_overview),
     path("dashboard/<int:station_id>/transactions/",    views.dashboard_transactions),
+    # Employees
+    path("dashboard/<int:station_id>/employees/",                   views.employees_list),
+    path("dashboard/<int:station_id>/employees/<int:employee_id>/",  views.employee_delete),
 ]

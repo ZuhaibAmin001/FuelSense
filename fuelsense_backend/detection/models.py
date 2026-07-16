@@ -92,3 +92,18 @@ class FuelTransaction(models.Model):
 
     class Meta:
         ordering = ['-timestamp']
+class Employee(models.Model):
+    SHIFT_CHOICES = [('MORNING', 'Morning'), ('EVENING', 'Evening'), ('NIGHT', 'Night')]
+    station    = models.ForeignKey(Station, on_delete=models.CASCADE, related_name='employees')
+    name       = models.CharField(max_length=200)
+    phone      = models.CharField(max_length=15, blank=True, default='')
+    role       = models.CharField(max_length=50, default='Pump Attendant')
+    shift      = models.CharField(max_length=10, choices=SHIFT_CHOICES, default='MORNING')
+    is_active  = models.BooleanField(default=True)
+    joined_at  = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.station.name}"
+
+    class Meta:
+        ordering = ['-joined_at']
