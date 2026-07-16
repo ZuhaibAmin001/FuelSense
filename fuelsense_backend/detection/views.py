@@ -128,8 +128,18 @@ def signup(request):
         username=phone, password=password,
         first_name=parts[0], last_name=parts[1] if len(parts) > 1 else ''
     )
-    UserProfile.objects.create(user=user, phone=phone, cnic=cnic, is_phone_verified=True)
+    role       = data.get('role', 'driver')
+    station_id = data.get('station_id')
+
+    is_owner = (role == 'owner' and station_id is not None)
+
+    UserProfile.objects.create(
+        user=user, phone=phone, cnic=cnic, is_phone_verified=True,
+        is_station_owner=is_owner,
+        owned_station_id=station_id if is_owner else None,
+    )
     return JsonResponse({'message': 'Account created', 'user_id': user.id, **_tokens(user)}, status=201)
+
 
 
 @api_view(['POST'])
