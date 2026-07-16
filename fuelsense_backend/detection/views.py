@@ -9,7 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 import json, math
-from .models import Station, QueueStatus, UserProfile, OTPRecord, FuelTransaction
+from .models import Station, QueueStatus, UserProfile, OTPRecord, FuelTransaction, Employee
 
 DETECTION_API_KEY = "fuelsense2024"
 
@@ -338,3 +338,56 @@ def dashboard_transactions(request, station_id):
          'vehicle_reg': t.vehicle_reg, 'timestamp': str(t.timestamp)}
         for t in txns
     ], 'count': txns.count()})
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def employees_list(request, station_id):
+    try:
+        s = Station.objects.get(id=station_id)
+    except Station.DoesNotExist:
+        return JsonResponse({'error': 'Station not found'}, status=404)
+
+    profile = request.user.profile
+    if not profile.is_station_owner or profile.owned_station_id != s.id:
+        return JsonResponse({'error': 'Not authorized'}, status=403)
+
+    if request.method == 'GET':
+        emps = Employee.objects.filter(station=s)
+        return JsonResponse({'employees': [
+            {'id': e.id, 'name': e.name, 'phone': e.phone, 'role': e.role,
+             'shift': e.shift, 'is_active': e.is_active, 'joined_at': str(e.joined_at)}
+            for e in emps
+        ]})
+
+    data = request.data
+    name = data.get('name', '').strip()
+    if not name:
+        return JsonResponse({'error': 'Name required'}, status=400)
+    emp = Employee.objects.create(
+        station=s, name=name,
+        phone=data.get('phone', ''),
+        role=data.get('role', 'Pump Attendant'),
+        shift=data.get('shift', 'MORNING'),
+    )
+    return JsonResponse({'id': emp.id, 'message': 'Employee added'}, status=201)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def employee_delete(request, station_id, employee_id):
+    try:
+        s = Station.objects.get(id=station_id)
+        emp = Employee.objects.get(id=employee_id, station=s)
+    except (Station.DoesNotExist, Employee.DoesNotExist):
+        return JsonResponse({'error': 'Not found'}, status=404)
+
+    profile = request.user.profile
+    if not profile.is_station_owner or profile.owned_station_id != s.id:
+        return JsonResponse({'error': 'Not authorized'}, status=403)
+
+    emp.delete()
+    return JsonResponse({'message': 'Deleted'})
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def stations_list_simple(request):
+    stations = Station.objects.filter(is_active=True).values('id', 'name', 'address')
+    return JsonResponse({'stations': list(stations)}, safe=False)

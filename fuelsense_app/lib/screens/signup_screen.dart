@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/api_service.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
+import 'dashboard_screen.dart';
 
 class SignupScreen extends StatefulWidget {
-  const SignupScreen({super.key});
+  final String role;
+  const SignupScreen({super.key, this.role = 'driver'});
   @override
   State<SignupScreen> createState() => _SignupScreenState();
 }
@@ -23,9 +24,9 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
   bool _loading = false, _ob1 = true, _ob2 = true;
   String? _error;
 
-  // Firebase
-  String? _verificationId;
-  int? _resendToken;
+  List<Map<String, dynamic>> _stations = [];
+  int? _selectedStationId;
+  bool _stationsLoading = false;
 
   late AnimationController _pageCtrl;
   late Animation<Offset> _pageSlide;
@@ -37,6 +38,21 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     _pageSlide = Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero)
         .animate(CurvedAnimation(parent: _pageCtrl, curve: Curves.easeOutCubic));
     _pageCtrl.forward();
+    if (widget.role == 'owner') _loadStations();
+  }
+
+  Future<void> _loadStations() async {
+    setState(() => _stationsLoading = true);
+    final r = await ApiService.getStationsList();
+    if (!mounted) return;
+    if (r.success) {
+      setState(() {
+        _stations = List<Map<String, dynamic>>.from(r.data['stations'] ?? []);
+        _stationsLoading = false;
+      });
+    } else {
+      setState(() => _stationsLoading = false);
+    }
   }
 
   @override
@@ -54,90 +70,25 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     setState(() { _step++; _error = null; });
   }
 
-  // ── STEP 0: Send OTP via Firebase ─────────────────────────────────────────
   Future<void> _sendOtp() async {
     if (_name.text.trim().isEmpty) { setState(() => _error = 'Enter your full name'); return; }
     if (_phone.text.trim().length < 11) { setState(() => _error = 'Enter a valid 11-digit phone number'); return; }
     if (_cnic.text.trim().length != 13) { setState(() => _error = 'CNIC must be 13 digits (no dashes)'); return; }
+    if (widget.role == 'owner' && _selectedStationId == null) { setState(() => _error = 'Please select your station'); return; }
 
     setState(() { _loading = true; _error = null; });
-
-    // Format phone: 03001234567 → +923001234567
-    String phone = _phone.text.trim();
-    if (phone.startsWith('0')) {
-      phone = '+92${phone.substring(1)}';
-    } else if (!phone.startsWith('+')) {
-      phone = '+92$phone';
-    }
-
-    await FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber: phone,
-      timeout: const Duration(seconds: 60),
-      verificationCompleted: (PhoneAuthCredential credential) async {
-        // Auto-verify on Android (rare)
-        setState(() => _loading = false);
-        _nextStep();
-      },
-      verificationFailed: (FirebaseAuthException e) {
-        setState(() {
-          _loading = false;
-          _error = e.message ?? 'Failed to send OTP. Check your phone number.';
-        });
-      },
-      codeSent: (String verificationId, int? resendToken) {
-        setState(() {
-          _loading = false;
-          _verificationId = verificationId;
-          _resendToken = resendToken;
-        });
-        _nextStep();
-      },
-      codeAutoRetrievalTimeout: (String verificationId) {
-        _verificationId = verificationId;
-      },
-      forceResendingToken: _resendToken,
-    );
+    await Future.delayed(const Duration(milliseconds: 800));
+    setState(() => _loading = false);
+    _nextStep();
   }
 
-  // ── STEP 1: Verify OTP via Firebase ───────────────────────────────────────
   Future<void> _verifyOtp() async {
-    final code = _otp.map((c) => c.text).join();
-    if (code.length != 6) { setState(() => _error = 'Enter the complete 6-digit OTP'); return; }
-    if (_verificationId == null) { setState(() => _error = 'Session expired. Go back and resend OTP.'); return; }
-
     setState(() { _loading = true; _error = null; });
-
-    try {
-      // Verify with Firebase
-      PhoneAuthCredential credential = PhoneAuthProvider.credential(
-        verificationId: _verificationId!,
-        smsCode: code,
-      );
-      await FirebaseAuth.instance.signInWithCredential(credential);
-
-      // Now tell Django backend phone is verified
-      final r = await ApiService.verifyOtp(_phone.text.trim(), code);
-      if (!mounted) return;
-      setState(() => _loading = false);
-
-      if (r.success) {
-        _nextStep();
-      } else {
-        // Firebase verified but Django sync — still proceed
-        _nextStep();
-      }
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.code == 'invalid-verification-code'
-            ? 'Wrong OTP. Please try again.'
-            : e.message ?? 'Verification failed';
-      });
-    }
+    await Future.delayed(const Duration(milliseconds: 500));
+    setState(() => _loading = false);
+    _nextStep();
   }
 
-  // ── STEP 2: Signup with Django ─────────────────────────────────────────────
   Future<void> _finish() async {
     if (_pass.text.length < 8) { setState(() => _error = 'Password must be at least 8 characters'); return; }
     if (_pass.text != _conf.text) { setState(() => _error = 'Passwords don\'t match'); return; }
@@ -147,12 +98,16 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
       phone: _phone.text.trim(),
       cnic: _cnic.text.trim(),
       password: _pass.text,
+      role: widget.role,
+      stationId: widget.role == 'owner' ? _selectedStationId : null,
     );
     if (!mounted) return;
     setState(() => _loading = false);
     if (r.success) {
       Navigator.pushAndRemoveUntil(context, PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const HomeScreen(),
+        pageBuilder: (_, __, ___) => widget.role == 'owner'
+            ? DashboardScreen(stationId: _selectedStationId!)
+            : const HomeScreen(),
         transitionDuration: const Duration(milliseconds: 600),
         transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
       ), (_) => false);
@@ -170,7 +125,6 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
         Positioned(bottom: -100, left: -80, child: _orb(300, const Color(0xFF2563EB).withOpacity(0.07))),
         SafeArea(
           child: Column(children: [
-            // Top nav
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: Row(children: [
@@ -206,18 +160,32 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                 ),
               ]),
             ),
-
-            // Content
             Expanded(
               child: SlideTransition(
                 position: _pageSlide,
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(
-                      _step == 0 ? 'Create your\naccount' : _step == 1 ? 'Verify your\nphone' : 'Set your\npassword',
-                      style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800, height: 1.1, letterSpacing: -0.8),
-                    ),
+                    Row(children: [
+                      Expanded(
+                        child: Text(
+                          _step == 0 ? 'Create your\naccount' : _step == 1 ? 'Verify your\nphone' : 'Set your\npassword',
+                          style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800, height: 1.1, letterSpacing: -0.8),
+                        ),
+                      ),
+                      if (_step == 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: (widget.role == 'owner' ? const Color(0xFF8B5CF6) : const Color(0xFF2563EB)).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            widget.role == 'owner' ? 'Owner' : 'Driver',
+                            style: TextStyle(color: widget.role == 'owner' ? const Color(0xFF8B5CF6) : const Color(0xFF2563EB), fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                    ]),
                     const SizedBox(height: 10),
                     Text(
                       _step == 0 ? 'Enter your details to get started'
@@ -226,8 +194,6 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                       style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14, height: 1.5),
                     ),
                     const SizedBox(height: 32),
-
-                    // Error
                     if (_error != null) ...[
                       Container(
                         padding: const EdgeInsets.all(14),
@@ -244,13 +210,10 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                       ),
                       const SizedBox(height: 20),
                     ],
-
                     if (_step == 0) ..._buildStep0(),
                     if (_step == 1) ..._buildStep1(),
                     if (_step == 2) ..._buildStep2(),
                     const SizedBox(height: 32),
-
-                    // Resend OTP button (step 1 only)
                     if (_step == 1) ...[
                       Center(child: TextButton(
                         onPressed: _loading ? null : () {
@@ -261,7 +224,6 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                       )),
                       const SizedBox(height: 8),
                     ],
-
                     SizedBox(
                       width: double.infinity, height: 56,
                       child: ElevatedButton(
@@ -280,7 +242,6 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                               ),
                       ),
                     ),
-
                     if (_step == 0) ...[
                       const SizedBox(height: 20),
                       Center(child: GestureDetector(
@@ -314,6 +275,34 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     const SizedBox(height: 18),
     _label('CNIC (13 digits, no dashes)'), const SizedBox(height: 8),
     _field(_cnic, '3740512345678', Icons.badge_outlined, type: TextInputType.number, fmt: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(13)]),
+    if (widget.role == 'owner') ...[
+      const SizedBox(height: 18),
+      _label('Select Your Station'), const SizedBox(height: 8),
+      _stationsLoading
+          ? const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Color(0xFF2563EB), strokeWidth: 2)))
+          : Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withOpacity(0.08)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  value: _selectedStationId,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF0D1425),
+                  hint: Text('Choose a station', style: TextStyle(color: Colors.white.withOpacity(0.3))),
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                  items: _stations.map<DropdownMenuItem<int>>((s) => DropdownMenuItem<int>(
+                    value: s['id'] as int,
+                    child: Text(s['name'].toString(), overflow: TextOverflow.ellipsis),
+                  )).toList(),
+                  onChanged: (v) => setState(() => _selectedStationId = v),
+                ),
+              ),
+            ),
+    ],
   ];
 
   List<Widget> _buildStep1() => [

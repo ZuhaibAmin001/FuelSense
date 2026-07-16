@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../services/api_service.dart';
 import 'signup_screen.dart';
 import 'home_screen.dart';
+import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -36,11 +37,13 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
     setState(() { _loading = true; _error = null; });
     final r = await ApiService.login(_phone.text.trim(), _pass.text);
-    if (!mounted) return;
-    setState(() => _loading = false);
-    if (r.success) {
+     if (r.success) {
+      final isOwner = r.data['is_station_owner'] == true;
+      final stationId = r.data['owned_station_id'];
       Navigator.pushAndRemoveUntil(context, PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const HomeScreen(),
+        pageBuilder: (_, __, ___) => (isOwner && stationId != null)
+            ? DashboardScreen(stationId: stationId)
+            : const HomeScreen(),
         transitionDuration: const Duration(milliseconds: 600),
         transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
       ), (_) => false);
