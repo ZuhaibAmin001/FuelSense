@@ -10,7 +10,7 @@ urlpatterns = [
     path("stations/nearby/",                    views.nearby_stations),
     path("stations/<int:station_id>/status/",   views.station_status),
     path("stations/<int:station_id>/history/",  views.station_history),
-
+    path("stations/list/", views.stations_list_simple),
     # Auth
     path("auth/send-otp/",                      views.send_otp),
     path("auth/verify-otp/",                    views.verify_otp),

@@ -45,19 +45,71 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
   @override
   void dispose() { _heroCtrl.dispose(); _slideCtrl.dispose(); super.dispose(); }
 
+  void _showRoleSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        decoration: const BoxDecoration(
+          color: Color(0xFF0D1425),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 24),
+          const Align(alignment: Alignment.centerLeft, child: Text('I am a...', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800))),
+          const SizedBox(height: 20),
+          _roleOption(ctx, icon: Icons.directions_car_rounded, title: 'Driver', desc: 'Find fuel stations & check live queues', color: const Color(0xFF2563EB), role: 'driver'),
+          const SizedBox(height: 14),
+          _roleOption(ctx, icon: Icons.storefront_rounded, title: 'Station Owner', desc: 'Manage your station, employees & stats', color: const Color(0xFF8B5CF6), role: 'owner'),
+        ]),
+      ),
+    );
+  }
+
+  Widget _roleOption(BuildContext ctx, {required IconData icon, required String title, required String desc, required Color color, required String role}) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.pop(ctx);
+        Navigator.push(context, _route(SignupScreen(role: role)));
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+            const SizedBox(height: 2),
+            Text(desc, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)),
+          ])),
+          Icon(Icons.chevron_right_rounded, color: Colors.white.withOpacity(0.3)),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     return Scaffold(
       backgroundColor: const Color(0xFF0A0F1E),
       body: Stack(children: [
-        // Background
         CustomPaint(size: size, painter: _DotGridPainter()),
         Positioned(top: -150, right: -100, child: _orb(350, const Color(0xFF2563EB).withOpacity(0.08))),
         Positioned(bottom: 200, left: -80, child: _orb(280, const Color(0xFF10B981).withOpacity(0.06))),
 
         SafeArea(child: Column(children: [
-          // Top bar
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: FadeTransition(
@@ -85,7 +137,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
             ),
           ),
 
-          // Hero section
           Expanded(
             child: SlideTransition(
               position: _slideAnim,
@@ -97,7 +148,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Badge
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
@@ -112,7 +162,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
                         ]),
                       ),
                       const SizedBox(height: 24),
-                      // Headline
                       RichText(
                         text: const TextSpan(
                           style: TextStyle(fontSize: 38, fontWeight: FontWeight.w800, height: 1.1, letterSpacing: -0.5),
@@ -129,8 +178,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
                         style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 15, height: 1.6, letterSpacing: 0.2),
                       ),
                       const SizedBox(height: 40),
-
-                      // Feature cards - animated cycling
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 400),
                         transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: SlideTransition(position: Tween<Offset>(begin: const Offset(0.1, 0), end: Offset.zero).animate(anim), child: child)),
@@ -143,8 +190,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
                         ),
                       ),
                       const SizedBox(height: 16),
-
-                      // Feature dots
                       Row(children: List.generate(3, (i) => AnimatedContainer(
                         duration: const Duration(milliseconds: 300),
                         margin: const EdgeInsets.only(right: 6),
@@ -162,7 +207,6 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
             ),
           ),
 
-          // Bottom CTA
           FadeTransition(
             opacity: _heroFade,
             child: Padding(
@@ -172,7 +216,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> with TickerProviderStateM
                   width: double.infinity,
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: () => Navigator.push(context, _route(const SignupScreen())),
+                    onPressed: _showRoleSheet,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2563EB),
                       foregroundColor: Colors.white,

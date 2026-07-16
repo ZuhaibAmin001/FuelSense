@@ -386,3 +386,8 @@ def employee_delete(request, station_id, employee_id):
 
     emp.delete()
     return JsonResponse({'message': 'Deleted'})
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def stations_list_simple(request):
+    stations = Station.objects.filter(is_active=True).values('id', 'name', 'address')
+    return JsonResponse({'stations': list(stations)}, safe=False)

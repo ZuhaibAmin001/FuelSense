@@ -184,9 +184,14 @@ if (mounted) {
       _tab = 0;
       _selected = null;
     });
-    _mapCtrl.move(LatLng(toLat, toLng), 13);
+    // Center between user and station
     if (_pos != null) {
+      final midLat = (_pos!.latitude + toLat) / 2;
+      final midLng = (_pos!.longitude + toLng) / 2;
+      _mapCtrl.move(LatLng(midLat, midLng), 12);
       _fetchRoute(_pos!.latitude, _pos!.longitude, toLat, toLng);
+    } else {
+      _mapCtrl.move(LatLng(toLat, toLng), 13);
     }
   }
 

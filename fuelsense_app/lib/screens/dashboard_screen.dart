@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import 'employee_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final int stationId;
@@ -82,6 +83,21 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         Text(_data?['station'] ?? 'Station Dashboard', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
         Text('Owner Analytics', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)),
       ])),
+      GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+          builder: (_) => EmployeeScreen(stationId: widget.stationId),
+        )),
+        child: Container(
+          width: 40, height: 40,
+          margin: const EdgeInsets.only(right: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF8B5CF6).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.2)),
+          ),
+          child: const Icon(Icons.people_alt_rounded, color: Color(0xFF8B5CF6), size: 18),
+        ),
+      ),
       GestureDetector(
         onTap: _load,
         child: Container(
