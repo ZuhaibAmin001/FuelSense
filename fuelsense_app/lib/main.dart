@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 import 'services/api_service.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/dashboard_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -69,10 +71,19 @@ class _SplashGateState extends State<SplashGate> with SingleTickerProviderStateM
     await Future.delayed(const Duration(milliseconds: 2000));
     if (!mounted) return;
     final loggedIn = await ApiService.isLoggedIn();
+    Widget target = const WelcomeScreen();
+    if (loggedIn) {
+      final user = await ApiService.getSavedUser();
+      final isOwner = user?['is_station_owner'] == true;
+      final stationId = user?['owned_station_id'];
+      target = (isOwner && stationId != null)
+          ? DashboardScreen(stationId: stationId)
+          : const HomeScreen();
+    }
     if (!mounted) return;
     Navigator.pushReplacement(context, PageRouteBuilder(
       transitionDuration: const Duration(milliseconds: 600),
-      pageBuilder: (_, __, ___) => loggedIn ? const HomeScreen() : const WelcomeScreen(),
+      pageBuilder: (_, __, ___) => target,
       transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
     ));
   }
@@ -85,12 +96,9 @@ class _SplashGateState extends State<SplashGate> with SingleTickerProviderStateM
     return Scaffold(
       backgroundColor: const Color(0xFF0A0F1E),
       body: Stack(children: [
-        // Background grid pattern
         CustomPaint(size: MediaQuery.of(context).size, painter: _GridPainter()),
-        // Glow orbs
         Positioned(top: -120, left: -80, child: _glowOrb(300, const Color(0xFF2563EB).withOpacity(0.12))),
         Positioned(bottom: -80, right: -60, child: _glowOrb(250, const Color(0xFF10B981).withOpacity(0.08))),
-        // Logo
         Center(child: AnimatedBuilder(
           animation: _ctrl,
           builder: (_, __) => FadeTransition(

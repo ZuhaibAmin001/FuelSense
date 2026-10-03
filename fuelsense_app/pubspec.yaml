@@ -25,15 +25,20 @@ dependencies:
   url_launcher: ^6.2.0
   share_plus: ^7.2.0
   shared_preferences: ^2.2.2
-  firebase_core: ^4.9.0
-  firebase_auth: ^6.5.1
+  firebase_core: ^2.32.0
+  firebase_auth: ^4.20.0
   flutter_map_cancellable_tile_provider: ^2.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
 
   flutter_lints: ^3.0.1
 
 flutter:
   uses-material-design: true
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"

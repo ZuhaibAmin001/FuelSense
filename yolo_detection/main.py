@@ -10,14 +10,13 @@ import tkinter as tk
 model = YOLO("yolov8n.pt")
 
 monitor = {
-     "top": 243,
-    "left": 339,
-    "width": 562,
-    "height": 313
+    "top": 374,
+    "left": 504,
+    "width": 1316,
+    "height": 538
 }
 
-BACKEND_URL = "https://fuelsense-backend.onrender.com/api/update_queue/"
-
+BACKEND_URL = "http://127.0.0.1:8000/api/update_queue/"
 def send_to_backend(count):
     try:
         requests.post(BACKEND_URL, json={

@@ -17,6 +17,8 @@ urlpatterns = [
     path("auth/signup/",                        views.signup),
     path("auth/login/",                         views.login_view),
     path("auth/profile/",                       views.my_profile),
+    path("auth/request-password-reset/",        views.request_password_reset),
+    path("auth/reset-password/",                views.reset_password),
 
     # Owner Dashboard
     path("dashboard/<int:station_id>/overview/",        views.dashboard_overview),

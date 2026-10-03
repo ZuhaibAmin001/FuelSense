@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_service.dart';
 import 'signup_screen.dart';
+import 'forgot_password_screen.dart';
 import 'home_screen.dart';
 import 'dashboard_screen.dart';
 
@@ -37,6 +38,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
     setState(() { _loading = true; _error = null; });
     final r = await ApiService.login(_phone.text.trim(), _pass.text);
+    print('LOGIN RESPONSE: ${r.data}'); 
      if (r.success) {
       final isOwner = r.data['is_station_owner'] == true;
       final stationId = r.data['owned_station_id'];

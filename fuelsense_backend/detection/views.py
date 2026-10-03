@@ -26,6 +26,15 @@ def haversine(lat1, lng1, lat2, lng2):
     a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng/2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
+def send_otp_email(email: str, otp: str):
+    from django.core.mail import send_mail
+    send_mail(
+        subject='FuelSense Password Reset OTP',
+        message=f'Your FuelSense password reset OTP is: {otp}\nValid for 5 minutes. Do not share this with anyone.',
+        from_email=None,
+        recipient_list=[email],
+        fail_silently=False,
+    )
 
 def send_otp_sms(phone: str, otp: str):
     if getattr(settings, 'OTP_USE_TWILIO', False):
@@ -81,7 +90,7 @@ def send_otp(request):
         return JsonResponse({'error': 'Valid phone number required'}, status=400)
     OTPRecord.objects.filter(phone=phone, is_used=False).update(is_used=True)
     otp = OTPRecord.generate_otp()
-    OTPRecord.objects.create(phone=phone, otp=otp)
+    OTPRecord.objects.create(phone=phone, otp=otp, purpose='SIGNUP')
     try:
         send_otp_sms(phone, otp)
     except Exception as e:
@@ -96,15 +105,58 @@ def send_otp(request):
 @permission_classes([AllowAny])
 def verify_otp(request):
     phone = request.data.get('phone', '').strip()
-    if not phone:
-        return JsonResponse({'error': 'Phone required'}, status=400)
-    try:
-        p = UserProfile.objects.get(phone=phone)
-        p.is_phone_verified = True
-        p.save()
-    except UserProfile.DoesNotExist:
-        pass
+    otp   = request.data.get('otp', '').strip()
+    if not phone or not otp:
+        return JsonResponse({'error': 'Phone and OTP required'}, status=400)
+    record = OTPRecord.objects.filter(phone=phone, otp=otp, purpose='SIGNUP').order_by('-created_at').first()
+    if not record or not record.is_valid():
+        return JsonResponse({'error': 'Invalid or expired OTP'}, status=400)
+    record.is_used = True
+    record.save()
     return JsonResponse({'verified': True, 'phone': phone})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_password_reset(request):
+    email = request.data.get('email', '').strip().lower()
+    if not email:
+        return JsonResponse({'error': 'Email required'}, status=400)
+    if not UserProfile.objects.filter(email__iexact=email).exists():
+        return JsonResponse({'error': 'No account found with this email'}, status=404)
+    OTPRecord.objects.filter(email=email, purpose='RESET', is_used=False).update(is_used=True)
+    otp = OTPRecord.generate_otp()
+    OTPRecord.objects.create(email=email, otp=otp, purpose='RESET')
+    try:
+        send_otp_email(email, otp)
+    except Exception as e:
+        return JsonResponse({'error': f'Email failed: {e}'}, status=500)
+    return JsonResponse({'message': f'OTP sent to {email}'})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request):
+    email        = request.data.get('email', '').strip().lower()
+    otp          = request.data.get('otp', '').strip()
+    new_password = request.data.get('new_password', '')
+    if not all([email, otp, new_password]):
+        return JsonResponse({'error': 'Email, OTP and new password required'}, status=400)
+    if len(new_password) < 8:
+        return JsonResponse({'error': 'Password must be 8+ characters'}, status=400)
+    record = OTPRecord.objects.filter(email=email, otp=otp, purpose='RESET').order_by('-created_at').first()
+    if not record or not record.is_valid():
+        return JsonResponse({'error': 'Invalid or expired OTP'}, status=400)
+    try:
+        profile = UserProfile.objects.get(email__iexact=email)
+    except UserProfile.DoesNotExist:
+        return JsonResponse({'error': 'No account found with this email'}, status=404)
+    user = profile.user
+    user.set_password(new_password)
+    user.save()
+    record.is_used = True
+    record.save()
+    return JsonResponse({'message': 'Password reset successful'})
 
 
 @api_view(['POST'])
@@ -115,6 +167,7 @@ def signup(request):
     phone     = data.get('phone', '').strip()
     cnic      = data.get('cnic', '').strip()
     password  = data.get('password', '')
+    email     = data.get('email', '').strip().lower()
     if not all([full_name, phone, cnic, password]):
         return JsonResponse({'error': 'All fields required'}, status=400)
     if len(password) < 8:
@@ -123,6 +176,8 @@ def signup(request):
         return JsonResponse({'error': 'Phone already registered'}, status=400)
     if UserProfile.objects.filter(cnic=cnic).exists():
         return JsonResponse({'error': 'CNIC already registered'}, status=400)
+    if email and UserProfile.objects.filter(email__iexact=email).exists():
+        return JsonResponse({'error': 'Email already registered'}, status=400)
     parts = full_name.split(' ', 1)
     user  = User.objects.create_user(
         username=phone, password=password,
@@ -134,12 +189,11 @@ def signup(request):
     is_owner = (role == 'owner' and station_id is not None)
 
     UserProfile.objects.create(
-        user=user, phone=phone, cnic=cnic, is_phone_verified=True,
+        user=user, phone=phone, cnic=cnic, email=email or None, is_phone_verified=True,
         is_station_owner=is_owner,
         owned_station_id=station_id if is_owner else None,
     )
     return JsonResponse({'message': 'Account created', 'user_id': user.id, **_tokens(user)}, status=201)
-
 
 
 @api_view(['POST'])
@@ -348,6 +402,8 @@ def dashboard_transactions(request, station_id):
          'vehicle_reg': t.vehicle_reg, 'timestamp': str(t.timestamp)}
         for t in txns
     ], 'count': txns.count()})
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def employees_list(request, station_id):
@@ -396,6 +452,8 @@ def employee_delete(request, station_id, employee_id):
 
     emp.delete()
     return JsonResponse({'message': 'Deleted'})
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def stations_list_simple(request):

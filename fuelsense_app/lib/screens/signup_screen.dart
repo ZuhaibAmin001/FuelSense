@@ -19,6 +19,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
   final _cnic  = TextEditingController();
   final _pass  = TextEditingController();
   final _conf  = TextEditingController();
+  final _email = TextEditingController();
   final List<TextEditingController> _otp = List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _foci = List.generate(6, (_) => FocusNode());
   bool _loading = false, _ob1 = true, _ob2 = true;
@@ -41,7 +42,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     if (widget.role == 'owner') _loadStations();
   }
 
-  Future<void> _loadStations() async {
+    Future<void> _loadStations() async {
     setState(() => _stationsLoading = true);
     final r = await ApiService.getStationsList();
     if (!mounted) return;
@@ -58,7 +59,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
   @override
   void dispose() {
     _name.dispose(); _phone.dispose(); _cnic.dispose();
-    _pass.dispose(); _conf.dispose();
+    _pass.dispose(); _conf.dispose(); _email.dispose();
     for (var c in _otp) c.dispose();
     for (var f in _foci) f.dispose();
     _pageCtrl.dispose();
@@ -70,26 +71,40 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     setState(() { _step++; _error = null; });
   }
 
-  Future<void> _sendOtp() async {
+    Future<void> _sendOtp() async {
     if (_name.text.trim().isEmpty) { setState(() => _error = 'Enter your full name'); return; }
     if (_phone.text.trim().length < 11) { setState(() => _error = 'Enter a valid 11-digit phone number'); return; }
     if (_cnic.text.trim().length != 13) { setState(() => _error = 'CNIC must be 13 digits (no dashes)'); return; }
     if (widget.role == 'owner' && _selectedStationId == null) { setState(() => _error = 'Please select your station'); return; }
 
     setState(() { _loading = true; _error = null; });
-    await Future.delayed(const Duration(milliseconds: 800));
+    final r = await ApiService.sendOtp(_phone.text.trim());
+    if (!mounted) return;
     setState(() => _loading = false);
-    _nextStep();
+    if (r.success) {
+      _nextStep();
+    } else {
+      setState(() => _error = r.error ?? 'Failed to send OTP');
+    }
   }
 
   Future<void> _verifyOtp() async {
+    final code = _otp.map((c) => c.text).join();
+    if (code.length != 6) { setState(() => _error = 'Enter 6-digit OTP'); return; }
+
     setState(() { _loading = true; _error = null; });
-    await Future.delayed(const Duration(milliseconds: 500));
+    final r = await ApiService.verifyOtp(_phone.text.trim(), code);
+    if (!mounted) return;
     setState(() => _loading = false);
-    _nextStep();
+    if (r.success) {
+      _nextStep();
+    } else {
+      setState(() => _error = r.error ?? 'Invalid OTP');
+    }
   }
 
-  Future<void> _finish() async {
+    Future<void> _finish() async {
+    if (_email.text.trim().isEmpty || !_email.text.contains('@')) { setState(() => _error = 'Enter a valid email address'); return; }
     if (_pass.text.length < 8) { setState(() => _error = 'Password must be at least 8 characters'); return; }
     if (_pass.text != _conf.text) { setState(() => _error = 'Passwords don\'t match'); return; }
     setState(() { _loading = true; _error = null; });
@@ -98,6 +113,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
       phone: _phone.text.trim(),
       cnic: _cnic.text.trim(),
       password: _pass.text,
+      email: _email.text.trim(),
       role: widget.role,
       stationId: widget.role == 'owner' ? _selectedStationId : null,
     );
@@ -267,11 +283,14 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     );
   }
 
-  List<Widget> _buildStep0() => [
+    List<Widget> _buildStep0() => [
     _label('Full Name'), const SizedBox(height: 8), _field(_name, 'e.g. Zuhaib Amin', Icons.person_outline_rounded),
     const SizedBox(height: 18),
     _label('Phone Number'), const SizedBox(height: 8),
     _field(_phone, '03001234567', Icons.phone_android_rounded, type: TextInputType.phone, fmt: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)]),
+    const SizedBox(height: 18),
+    _label('Email Address'), const SizedBox(height: 8),
+    _field(_email, 'yourname@gmail.com', Icons.email_outlined, type: TextInputType.emailAddress),
     const SizedBox(height: 18),
     _label('CNIC (13 digits, no dashes)'), const SizedBox(height: 8),
     _field(_cnic, '3740512345678', Icons.badge_outlined, type: TextInputType.number, fmt: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(13)]),

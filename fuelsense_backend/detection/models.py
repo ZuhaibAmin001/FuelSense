@@ -45,6 +45,7 @@ class QueueStatus(models.Model):
 class UserProfile(models.Model):
     user             = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     phone            = models.CharField(max_length=15, unique=True)
+    email            = models.EmailField(blank=True, null=True, unique=True)
     cnic             = models.CharField(max_length=15, unique=True)
     is_phone_verified = models.BooleanField(default=False)
     is_station_owner = models.BooleanField(default=False)
@@ -56,8 +57,12 @@ class UserProfile(models.Model):
 
 
 class OTPRecord(models.Model):
-    phone      = models.CharField(max_length=15)
+    PURPOSE_CHOICES = [('SIGNUP', 'Signup'), ('RESET', 'Password Reset')]
+
+    phone      = models.CharField(max_length=15, blank=True, null=True)
+    email      = models.EmailField(blank=True, null=True)
     otp        = models.CharField(max_length=6)
+    purpose    = models.CharField(max_length=10, choices=PURPOSE_CHOICES, default='SIGNUP')
     created_at = models.DateTimeField(auto_now_add=True)
     is_used    = models.BooleanField(default=False)
 

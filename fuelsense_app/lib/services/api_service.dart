@@ -3,8 +3,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String _base = 'https://fuelsense.pythonanywhere.com/api';
-  // ── Token storage ──────────────────────────────────────────────────────────
+  static const String _base = 'http://192.168.100.219:8000/api';
+  // ── Token storage ────────────────────────────────────────────────────────
   static Future<String?> getToken() async => (await SharedPreferences.getInstance()).getString('token');
 
   static Future<void> saveAuth(Map data) async {
@@ -26,26 +26,31 @@ class ApiService {
     return raw != null ? json.decode(raw) : null;
   }
 
-  // ── Internal helpers ───────────────────────────────────────────────────────
+  // ── Internal helpers ─────────────────────────────────────────────────────
   static Map<String,String> _h({String? token}) => {
     'Content-Type': 'application/json',
     if (token != null) 'Authorization': 'Bearer $token',
   };
 
-  // ── Auth ───────────────────────────────────────────────────────────────────
+  // ── Auth ─────────────────────────────────────────────────────────────────
   static Future<ApiResult> sendOtp(String phone) => _post('/auth/send-otp/', {'phone': phone});
   static Future<ApiResult> verifyOtp(String phone, String otp) => _post('/auth/verify-otp/', {'phone': phone, 'otp': otp});
+  static Future<ApiResult> requestPasswordReset(String email) => _post('/auth/request-password-reset/', {'email': email});
+  static Future<ApiResult> resetPassword(String email, String otp, String newPassword) =>
+      _post('/auth/reset-password/', {'email': email, 'otp': otp, 'new_password': newPassword});
 
   static Future<ApiResult> signup({
     required String fullName,
     required String phone,
     required String cnic,
     required String password,
+    String? email,
     String role = 'driver',
     int? stationId,
   }) async {
     final body = {
       'full_name': fullName, 'phone': phone, 'cnic': cnic, 'password': password, 'role': role,
+      if (email != null) 'email': email,
       if (stationId != null) 'station_id': stationId,
     };
     final r = await _post('/auth/signup/', body, expectedStatus: 201);
@@ -59,7 +64,7 @@ class ApiService {
     return r;
   }
 
-  // ── Stations ───────────────────────────────────────────────────────────────
+  // ── Stations ─────────────────────────────────────────────────────────────
   static Future<ApiResult> getAllStations() => _get('/traffic/status/');
 
   static Future<ApiResult> getNearbyStations(double lat, double lng, {double radius = 10}) =>
@@ -67,13 +72,13 @@ class ApiService {
 
   static Future<ApiResult> getStationsList() => _get('/stations/list/');
 
-  // ── Dashboard ──────────────────────────────────────────────────────────────
+  // ── Dashboard ────────────────────────────────────────────────────────────
   static Future<ApiResult> getDashboard(int stationId) async {
     final token = await getToken();
     return _get('/dashboard/$stationId/overview/', token: token);
   }
 
-  // ── Employees ──────────────────────────────────────────────────────────────
+  // ── Employees ────────────────────────────────────────────────────────────
   static Future<ApiResult> getEmployees(int stationId) async {
     final token = await getToken();
     return _get('/dashboard/$stationId/employees/', token: token);
@@ -93,7 +98,7 @@ class ApiService {
     return _delete('/dashboard/$stationId/employees/$employeeId/', token: token);
   }
 
-  // ── Private ────────────────────────────────────────────────────────────────
+  // ── Private ──────────────────────────────────────────────────────────────
   static Future<ApiResult> _get(String path, {String? token}) async {
     try {
       final res = await http.get(Uri.parse('$_base$path'), headers: _h(token: token));

@@ -2,6 +2,8 @@ from pathlib import Path
 from datetime import timedelta
 import os
 import dj_database_url
+from dotenv import load_dotenv
+load_dotenv()
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -80,7 +82,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 # ── OTP ─────────────────────────────────────────────────────────────────────
 # Set OTP_USE_TWILIO = True and fill creds when you get a Twilio account
-OTP_USE_TWILIO     = True
+OTP_USE_TWILIO     = False
 TWILIO_ACCOUNT_SID = 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'  # paste yours
 TWILIO_AUTH_TOKEN  = 'your_auth_token_here'               # paste yours
 TWILIO_FROM_NUMBER = '+1XXXXXXXXXX'                        # paste your Twilio number
@@ -98,5 +100,14 @@ TIME_ZONE = 'Asia/Karachi'
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'  
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ── Email (Gmail SMTP) — for password reset OTP ────────────────────────────
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
