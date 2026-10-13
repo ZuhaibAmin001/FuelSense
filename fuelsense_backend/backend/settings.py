@@ -8,8 +8,12 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-apbqh$t6x&l7ig@-x@u5laj=j&40*_*t=v&9p678$sd%whc)gq'
-DEBUG = False
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-apbqh$t6x&l7ig@-x@u5laj=j&40*_*t=v&9p678$sd%whc)gq',
+)
+# Set DJANGO_DEBUG=False in .env before deploying.
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes')
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
@@ -51,10 +55,7 @@ TEMPLATES = [{
     ]},
 }]
 
-# ── PostgreSQL ──────────────────────────────────────────────────────────────
-# 1. Install PostgreSQL → pgAdmin → create DB named "fuelsense_db"
-# 2. pip install psycopg2-binary
-# 3. Change PASSWORD below
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -80,13 +81,50 @@ SIMPLE_JWT = {
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# ── Email (Gmail SMTP) — every OTP is delivered by email ───────────────────
+# 1. Turn on 2-Step Verification for the Gmail account
+# 2. Create an App Password: https://myaccount.google.com/apppasswords
+# 3. Put the address and the 16-character app password in .env
+EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '').strip()
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '').strip()
+
+# The values in a fresh .env are placeholders, not real credentials. Treat them
+# as "not configured" so we never attempt SMTP with an app password of "abc".
+_EMAIL_PLACEHOLDERS = {
+    '',
+    'youremail@gmail.com',
+    'your_email@gmail.com',
+    'abcdefghijklmnop',
+    'your_app_password',
+    'your_auth_token_here',
+}
+EMAIL_IS_CONFIGURED = (
+    EMAIL_HOST_USER not in _EMAIL_PLACEHOLDERS
+    and EMAIL_HOST_PASSWORD not in _EMAIL_PLACEHOLDERS
+)
+
+EMAIL_HOST         = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT         = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USE_TLS      = True
+EMAIL_TIMEOUT = 15  # don't let the request hang if Gmail is unreachable
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER or 'FuelSense <no-reply@fuelsense.local>'
+
+if EMAIL_IS_CONFIGURED:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+else:
+    # No usable credentials: print the OTP email to the runserver console
+    # instead of failing the request. Fill in .env to send real mail.
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
 # ── OTP ─────────────────────────────────────────────────────────────────────
-# Set OTP_USE_TWILIO = True and fill creds when you get a Twilio account
-OTP_USE_TWILIO     = False
-TWILIO_ACCOUNT_SID = 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'  # paste yours
-TWILIO_AUTH_TOKEN  = 'your_auth_token_here'               # paste yours
-TWILIO_FROM_NUMBER = '+1XXXXXXXXXX'                        # paste your Twilio number
-OTP_EXPIRY_SECONDS = 300   # 5 minutes
+OTP_EXPIRY_SECONDS = int(os.environ.get('OTP_EXPIRY_SECONDS', 300))   # 5 minutes
+# While True, the OTP endpoints include the code in the response ("dev_otp") so
+# signup and reset can be tested without a working mailbox.
+# Set OTP_DEV_MODE=False in .env before deploying.
+OTP_DEV_MODE = os.environ.get('OTP_DEV_MODE', 'True').lower() in ('1', 'true', 'yes')
+
+# Shared secret the YOLO detector sends with POST /api/update_queue/
+DETECTION_API_KEY = os.environ.get('DETECTION_API_KEY', 'fuelsense2024')
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -102,12 +140,3 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-# ── Email (Gmail SMTP) — for password reset OTP ────────────────────────────
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER

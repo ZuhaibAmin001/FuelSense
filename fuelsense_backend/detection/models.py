@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
-import random, string
+import secrets, string
 
 
 class Station(models.Model):
@@ -68,7 +68,7 @@ class OTPRecord(models.Model):
 
     @staticmethod
     def generate_otp():
-        return ''.join(random.choices(string.digits, k=6))
+        return ''.join(secrets.choice(string.digits) for _ in range(6))
 
     def is_valid(self):
         from django.conf import settings

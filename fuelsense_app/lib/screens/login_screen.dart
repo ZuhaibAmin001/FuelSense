@@ -15,7 +15,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
   final _phone = TextEditingController();
   final _pass = TextEditingController();
-  bool _loading = false, _obscure = true;
+  bool _loading = false, _obscure = true, _wrongPassword = false;
   String? _error;
   late AnimationController _shakeCtrl;
   late Animation<double> _shakeAnim;
@@ -28,7 +28,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   }
 
   @override
-  void dispose() { _phone.dispose(); _pass.dispose(); _shakeCtrl.dispose(); super.dispose(); }
+  void dispose() { 
+    _phone.dispose(); 
+    _pass.dispose(); 
+    _shakeCtrl.dispose(); 
+    super.dispose(); 
+  }
 
   Future<void> _login() async {
     if (_phone.text.trim().isEmpty || _pass.text.isEmpty) {
@@ -37,11 +42,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       return;
     }
     setState(() { _loading = true; _error = null; });
+    
     final r = await ApiService.login(_phone.text.trim(), _pass.text);
-    print('LOGIN RESPONSE: ${r.data}'); 
-     if (r.success) {
+    if (!mounted) return;
+    
+    if (r.success) {
+      print('LOGIN RESPONSE: ${r.data}'); 
       final isOwner = r.data['is_station_owner'] == true;
       final stationId = r.data['owned_station_id'];
+      
       Navigator.pushAndRemoveUntil(context, PageRouteBuilder(
         pageBuilder: (_, __, ___) => (isOwner && stationId != null)
             ? DashboardScreen(stationId: stationId)
@@ -50,9 +59,21 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
       ), (_) => false);
     } else {
-      setState(() => _error = r.error ?? 'Login failed');
+      setState(() {
+        _loading = false;
+        _error = r.error ?? 'Login failed';
+        _wrongPassword = (r.error ?? '').toLowerCase().contains('invalid');
+      });
       _shakeCtrl.forward(from: 0);
     }
+  }
+
+  void _openForgotPassword() {
+    Navigator.push(context, PageRouteBuilder(
+      pageBuilder: (_, __, ___) => const ForgotPasswordScreen(),
+      transitionDuration: const Duration(milliseconds: 400),
+      transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
+    ));
   }
 
   @override
@@ -83,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               const SizedBox(height: 40),
 
               // Header
-              Text('Welcome\nback.', style: TextStyle(
+              const Text('Welcome\nback.', style: TextStyle(
                 color: Colors.white,
                 fontSize: 40,
                 fontWeight: FontWeight.w800,
@@ -116,6 +137,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       const Icon(Icons.error_outline_rounded, color: Color(0xFFEF4444), size: 18),
                       const SizedBox(width: 10),
                       Expanded(child: Text(_error!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13))),
+                      if (_wrongPassword) TextButton(
+                        onPressed: _openForgotPassword,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text('Reset it', style: TextStyle(color: Color(0xFF2563EB), fontSize: 13, fontWeight: FontWeight.w700)),
+                      ),
                     ]),
                   ),
                 ),
@@ -151,7 +181,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 ),
                 onSubmit: (_) => _login(),
               ),
-              const SizedBox(height: 40),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _loading ? null : _openForgotPassword,
+                  child: const Text('Forgot password?', style: TextStyle(color: Color(0xFF2563EB), fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(height: 24),
 
               // Login button
               SizedBox(

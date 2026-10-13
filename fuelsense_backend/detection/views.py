@@ -9,9 +9,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 import json, math
-from .models import Station, QueueStatus, UserProfile, OTPRecord, FuelTransaction, Employee
+from django.db import IntegrityError, transaction
+from .models import Station, QueueStatus, UserProfile, FuelTransaction, Employee
+from . import otp_service
 
-DETECTION_API_KEY = "fuelsense2024"
+DETECTION_API_KEY = getattr(settings, 'DETECTION_API_KEY', 'fuelsense2024')
 
 FUEL_PRICES = {
     'PETROL': 272,
@@ -26,28 +28,65 @@ def haversine(lat1, lng1, lat2, lng2):
     a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng/2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-def send_otp_email(email: str, otp: str):
-    from django.core.mail import send_mail
-    send_mail(
-        subject='FuelSense Password Reset OTP',
-        message=f'Your FuelSense password reset OTP is: {otp}\nValid for 5 minutes. Do not share this with anyone.',
-        from_email=None,
-        recipient_list=[email],
-        fail_silently=False,
-    )
+def _digits(value):
+    return ''.join(ch for ch in str(value or '') if ch.isdigit())
 
-def send_otp_sms(phone: str, otp: str):
-    if getattr(settings, 'OTP_USE_TWILIO', False):
-        from twilio.rest import Client
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        formatted = '+92' + phone.lstrip('0') if phone.startswith('0') else phone
-        client.messages.create(
-            body=f"FuelSense OTP: {otp}. Valid 5 minutes. Do not share.",
-            from_=settings.TWILIO_FROM_NUMBER,
-            to=formatted
-        )
-    else:
-        print(f"\n{'='*40}\n[DEV OTP] {phone}  ->  {otp}\n{'='*40}\n")
+
+def _normalize_phone(raw):
+    """Store every number in the local 03XXXXXXXXX form."""
+    digits = _digits(raw)
+    if digits.startswith('92'):
+        digits = '0' + digits[2:]
+    elif digits and not digits.startswith('0'):
+        digits = '0' + digits
+    return digits
+
+
+def _phone_variants(phone):
+    """Every form a phone number may have been saved under.
+
+    Lets members who registered before numbers were normalised still sign in.
+    """
+    digits = _digits(phone)
+    local = _normalize_phone(digits)
+    candidates = [phone, digits, local]
+    if len(local) == 11:
+        candidates += [local[1:], '92' + local[1:], '+92' + local[1:]]
+    seen, ordered = set(), []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            ordered.append(candidate)
+    return ordered
+
+
+def _login_candidates(identifier):
+    """Usernames to try, in order, for a phone number or email address."""
+    identifier = identifier.strip()
+    if '@' in identifier:
+        profile = UserProfile.objects.filter(email__iexact=identifier).select_related('user').first()
+        return [profile.user.username] if profile else [identifier]
+    variants = _phone_variants(identifier)
+    stored = list(User.objects.filter(username__in=variants).values_list('username', flat=True))
+    return stored or [identifier]
+
+
+def _otp_response(record, delivered, failure, message):
+    """Shared response for the two `send code` endpoints.
+
+    With OTP_DEV_MODE on the code travels back in the response so the flow can
+    be tested without a working mailbox; with it off a delivery failure is a
+    hard error instead of a silent one.
+    """
+    if not delivered and not getattr(settings, 'OTP_DEV_MODE', False):
+        return JsonResponse({'error': f'Could not send the email. {failure}'}, status=502)
+    payload = {'message': message}
+    code = otp_service.dev_code(record)
+    if code:
+        payload['dev_otp'] = code
+        if not delivered:
+            payload['warning'] = f'Email delivery failed ({failure}). OTP_DEV_MODE is on, so the code is in this response.'
+    return JsonResponse(payload)
 
 
 def _tokens(user):
@@ -84,134 +123,176 @@ def _seconds_ago(timestamp):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def send_otp(request):
-    phone = request.data.get('phone', '').strip()
-    if not phone or len(phone) < 10:
-        return JsonResponse({'error': 'Valid phone number required'}, status=400)
-    OTPRecord.objects.filter(phone=phone, is_used=False).update(is_used=True)
-    otp = OTPRecord.generate_otp()
-    OTPRecord.objects.create(phone=phone, otp=otp, purpose='SIGNUP')
-    try:
-        send_otp_sms(phone, otp)
-    except Exception as e:
-        return JsonResponse({'error': f'SMS failed: {e}'}, status=500)
-    return JsonResponse({
-        'message': f'OTP sent to {phone}',
-        'dev_otp': otp if settings.DEBUG else None
-    })
+def send_signup_otp(request):
+    """Email a 6-digit verification code to a new signup."""
+    email = (request.data.get('email') or '').strip().lower()
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return JsonResponse({'error': 'Enter a valid email address'}, status=400)
+    if UserProfile.objects.filter(email__iexact=email).exists():
+        return JsonResponse({'error': 'That email is already registered'}, status=400)
+
+    record = otp_service.issue(email, otp_service.PURPOSE_SIGNUP)
+    delivered, failure = otp_service.deliver(record)
+    return _otp_response(record, delivered, failure, f'Verification code sent to {email}')
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-def verify_otp(request):
-    phone = request.data.get('phone', '').strip()
-    otp   = request.data.get('otp', '').strip()
-    if not phone or not otp:
-        return JsonResponse({'error': 'Phone and OTP required'}, status=400)
-    record = OTPRecord.objects.filter(phone=phone, otp=otp, purpose='SIGNUP').order_by('-created_at').first()
-    if not record or not record.is_valid():
-        return JsonResponse({'error': 'Invalid or expired OTP'}, status=400)
-    record.is_used = True
-    record.save()
-    return JsonResponse({'verified': True, 'phone': phone})
+def verify_signup_otp(request):
+    """Check a signup code without consuming it - signup consumes it.
+
+    Re-checking at signup keeps the code single-use while still letting the app
+    confirm the address before asking for a password.
+    """
+    email = (request.data.get('email') or '').strip().lower()
+    code = (request.data.get('otp') or '').strip()
+    record, error = otp_service.check(email, code, otp_service.PURPOSE_SIGNUP)
+    if error:
+        return JsonResponse({'error': error}, status=400)
+    return JsonResponse({'verified': True, 'email': email})
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def request_password_reset(request):
-    email = request.data.get('email', '').strip().lower()
-    if not email:
-        return JsonResponse({'error': 'Email required'}, status=400)
+    email = (request.data.get('email') or '').strip().lower()
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return JsonResponse({'error': 'Enter a valid email address'}, status=400)
     if not UserProfile.objects.filter(email__iexact=email).exists():
         return JsonResponse({'error': 'No account found with this email'}, status=404)
+    last = OTPRecord.objects.filter(email=email, purpose='RESET').order_by('-created_at').first()
+    if last and (timezone.now() - last.created_at).total_seconds() < 60:
+        wait = 60 - int((timezone.now() - last.created_at).total_seconds())
+        return JsonResponse({'error': f'Please wait {wait}s before requesting another OTP'}, status=429)
     OTPRecord.objects.filter(email=email, purpose='RESET', is_used=False).update(is_used=True)
-    otp = OTPRecord.generate_otp()
-    OTPRecord.objects.create(email=email, otp=otp, purpose='RESET')
-    try:
-        send_otp_email(email, otp)
-    except Exception as e:
-        return JsonResponse({'error': f'Email failed: {e}'}, status=500)
-    return JsonResponse({'message': f'OTP sent to {email}'})
+    
+    if not UserProfile.objects.filter(email__iexact=email).exists():
+        return JsonResponse({'error': 'No account found with this email'}, status=404)
+
+    record = otp_service.issue(email, otp_service.PURPOSE_RESET)
+    delivered, failure = otp_service.deliver(record)
+    return _otp_response(record, delivered, failure, f'Reset code sent to {email}')
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def reset_password(request):
-    email        = request.data.get('email', '').strip().lower()
-    otp          = request.data.get('otp', '').strip()
-    new_password = request.data.get('new_password', '')
-    if not all([email, otp, new_password]):
-        return JsonResponse({'error': 'Email, OTP and new password required'}, status=400)
+    email        = (request.data.get('email') or '').strip().lower()
+    code         = (request.data.get('otp') or '').strip()
+    new_password = request.data.get('new_password') or ''
+    if not all([email, code, new_password]):
+        return JsonResponse({'error': 'Email, code and new password are required'}, status=400)
     if len(new_password) < 8:
-        return JsonResponse({'error': 'Password must be 8+ characters'}, status=400)
-    record = OTPRecord.objects.filter(email=email, otp=otp, purpose='RESET').order_by('-created_at').first()
-    if not record or not record.is_valid():
-        return JsonResponse({'error': 'Invalid or expired OTP'}, status=400)
-    try:
-        profile = UserProfile.objects.get(email__iexact=email)
-    except UserProfile.DoesNotExist:
+        return JsonResponse({'error': 'Password must be at least 8 characters'}, status=400)
+
+    record, error = otp_service.check(email, code, otp_service.PURPOSE_RESET)
+    if error:
+        return JsonResponse({'error': error}, status=400)
+
+    profile = UserProfile.objects.filter(email__iexact=email).select_related('user').first()
+    if profile is None:
         return JsonResponse({'error': 'No account found with this email'}, status=404)
+
     user = profile.user
     user.set_password(new_password)
-    user.save()
-    record.is_used = True
-    record.save()
+    user.save(update_fields=['password'])
+    otp_service.consume(record)
     return JsonResponse({'message': 'Password reset successful'})
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def signup(request):
+    """Create an account. Requires the 6-digit code emailed to the address.
+
+    The code is checked here as well as at verify-signup-otp, and is consumed
+    only once the account has actually been created, so a failed signup never
+    costs the member their code.
+    """
     data      = request.data
-    full_name = data.get('full_name', '').strip()
-    phone     = data.get('phone', '').strip()
-    cnic      = data.get('cnic', '').strip()
-    password  = data.get('password', '')
-    email     = data.get('email', '').strip().lower()
-    if not all([full_name, phone, cnic, password]):
-        return JsonResponse({'error': 'All fields required'}, status=400)
+    full_name = (data.get('full_name') or '').strip()
+    phone     = _normalize_phone(data.get('phone'))
+    cnic      = _digits(data.get('cnic'))
+    password  = data.get('password') or ''
+    email     = (data.get('email') or '').strip().lower()
+    code      = (data.get('otp') or '').strip()
+
+    if not all([full_name, phone, cnic, password, email, code]):
+        return JsonResponse(
+            {'error': 'Name, phone, email, CNIC, password and the verification code are all required'},
+            status=400,
+        )
+    if len(phone) != 11:
+        return JsonResponse({'error': 'Enter a valid 11-digit phone number'}, status=400)
+    if len(cnic) != 13:
+        return JsonResponse({'error': 'CNIC must be 13 digits'}, status=400)
     if len(password) < 8:
-        return JsonResponse({'error': 'Password must be 8+ characters'}, status=400)
-    if User.objects.filter(username=phone).exists():
-        return JsonResponse({'error': 'Phone already registered'}, status=400)
+        return JsonResponse({'error': 'Password must be at least 8 characters'}, status=400)
+
+    record, error = otp_service.check(email, code, otp_service.PURPOSE_SIGNUP)
+    if error:
+        return JsonResponse({'error': error}, status=400)
+
+    if UserProfile.objects.filter(phone__in=_phone_variants(phone)).exists():
+        return JsonResponse({'error': 'That phone number is already registered'}, status=400)
     if UserProfile.objects.filter(cnic=cnic).exists():
-        return JsonResponse({'error': 'CNIC already registered'}, status=400)
-    if email and UserProfile.objects.filter(email__iexact=email).exists():
-        return JsonResponse({'error': 'Email already registered'}, status=400)
-    parts = full_name.split(' ', 1)
-    user  = User.objects.create_user(
-        username=phone, password=password,
-        first_name=parts[0], last_name=parts[1] if len(parts) > 1 else ''
-    )
+        return JsonResponse({'error': 'That CNIC is already registered'}, status=400)
+    if UserProfile.objects.filter(email__iexact=email).exists():
+        return JsonResponse({'error': 'That email is already registered'}, status=400)
+
+    parts      = full_name.split(' ', 1)
     role       = data.get('role', 'driver')
     station_id = data.get('station_id')
+    is_owner   = (role == 'owner' and station_id is not None)
 
-    is_owner = (role == 'owner' and station_id is not None)
+    try:
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=phone, password=password, email=email,
+                first_name=parts[0], last_name=parts[1] if len(parts) > 1 else '',
+            )
+            # is_phone_verified stays False: the phone number is not verified,
+            # the email address is, and that is what the OTP record proves.
+            UserProfile.objects.create(
+                user=user, phone=phone, cnic=cnic, email=email,
+                is_station_owner=is_owner,
+                owned_station_id=station_id if is_owner else None,
+            )
+            otp_service.consume(record)
+    except IntegrityError:
+        return JsonResponse({'error': 'That phone number, CNIC or email is already registered'}, status=400)
 
-    UserProfile.objects.create(
-        user=user, phone=phone, cnic=cnic, email=email or None, is_phone_verified=True,
-        is_station_owner=is_owner,
-        owned_station_id=station_id if is_owner else None,
-    )
     return JsonResponse({'message': 'Account created', 'user_id': user.id, **_tokens(user)}, status=201)
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
-    phone    = request.data.get('phone', '').strip()
-    password = request.data.get('password', '')
-    user = authenticate(username=phone, password=password)
-    if not user:
-        return JsonResponse({'error': 'Invalid phone or password'}, status=401)
-    try:
-        profile = user.profile
-    except UserProfile.DoesNotExist:
-        return JsonResponse({'error': 'Account incomplete'}, status=400)
+    """Sign in with a phone number or an email address."""
+    identifier = (request.data.get('identifier') or request.data.get('phone') or '').strip()
+    password   = request.data.get('password') or ''
+    if not identifier or not password:
+        return JsonResponse({'error': 'Phone/email and password are required'}, status=400)
+
+    user = None
+    for username in _login_candidates(identifier):
+        user = authenticate(username=username, password=password)
+        if user is not None:
+            break
+    if user is None:
+        return JsonResponse({'error': 'Incorrect phone/email or password'}, status=401)
+    if not user.is_active:
+        return JsonResponse({'error': 'This account has been disabled'}, status=403)
+
+    profile = UserProfile.objects.filter(user=user).first()
+    if profile is None:
+        return JsonResponse({'error': 'Account setup is incomplete'}, status=400)
+
     return JsonResponse({
         'user_id': user.id,
         'full_name': user.get_full_name(),
         'phone': profile.phone,
+        'email': profile.email,
         'is_station_owner': profile.is_station_owner,
         'owned_station_id': profile.owned_station_id,
         **_tokens(user),
@@ -226,6 +307,7 @@ def my_profile(request):
         'user_id': request.user.id,
         'full_name': request.user.get_full_name(),
         'phone': p.phone,
+        'email': p.email,
         'is_station_owner': p.is_station_owner,
         'owned_station_id': p.owned_station_id,
     })

@@ -12,8 +12,8 @@ urlpatterns = [
     path("stations/<int:station_id>/history/",  views.station_history),
     path("stations/list/", views.stations_list_simple),
     # Auth
-    path("auth/send-otp/",                      views.send_otp),
-    path("auth/verify-otp/",                    views.verify_otp),
+    path("auth/send-otp/",                      views.send_signup_otp),
+    path("auth/verify-otp/",                    views.verify_signup_otp),
     path("auth/signup/",                        views.signup),
     path("auth/login/",                         views.login_view),
     path("auth/profile/",                       views.my_profile),

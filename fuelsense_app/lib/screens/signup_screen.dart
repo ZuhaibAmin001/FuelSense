@@ -24,6 +24,10 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
   final List<FocusNode> _foci = List.generate(6, (_) => FocusNode());
   bool _loading = false, _ob1 = true, _ob2 = true;
   String? _error;
+  /// Code the server echoes back while OTP_DEV_MODE is on. Shown on the verify
+  /// step so the flow can be demoed without a working mailbox; null in
+  /// production.
+  String? _devOtp;
 
   List<Map<String, dynamic>> _stations = [];
   int? _selectedStationId;
@@ -71,39 +75,55 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     setState(() { _step++; _error = null; });
   }
 
-    Future<void> _sendOtp() async {
+  String get _enteredCode => _otp.map((c) => c.text).join();
+
+  Future<void> _sendOtp() async {
     if (_name.text.trim().isEmpty) { setState(() => _error = 'Enter your full name'); return; }
-    if (_phone.text.trim().length < 11) { setState(() => _error = 'Enter a valid 11-digit phone number'); return; }
+    if (_phone.text.trim().length != 11) { setState(() => _error = 'Enter a valid 11-digit phone number'); return; }
+    final email = _email.text.trim();
+    if (email.isEmpty || !email.contains('@')) { setState(() => _error = 'Enter a valid email address'); return; }
     if (_cnic.text.trim().length != 13) { setState(() => _error = 'CNIC must be 13 digits (no dashes)'); return; }
     if (widget.role == 'owner' && _selectedStationId == null) { setState(() => _error = 'Please select your station'); return; }
 
     setState(() { _loading = true; _error = null; });
-    final r = await ApiService.sendOtp(_phone.text.trim());
+    final r = await ApiService.sendSignupOtp(email);
     if (!mounted) return;
-    setState(() => _loading = false);
     if (r.success) {
+      setState(() { _loading = false; _devOtp = r.devOtp; });
       _nextStep();
     } else {
-      setState(() => _error = r.error ?? 'Failed to send OTP');
+      setState(() { _loading = false; _error = r.error ?? 'Could not send the code'; });
     }
+  }
+
+  /// Issues a fresh code without making the member retype their details.
+  Future<void> _resendOtp() async {
+    for (var c in _otp) { c.clear(); }
+    setState(() { _loading = true; _error = null; });
+    final r = await ApiService.sendSignupOtp(_email.text.trim());
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _devOtp = r.devOtp;
+      if (!r.success) _error = r.error ?? 'Could not resend the code';
+    });
   }
 
   Future<void> _verifyOtp() async {
-    final code = _otp.map((c) => c.text).join();
-    if (code.length != 6) { setState(() => _error = 'Enter 6-digit OTP'); return; }
+    if (_enteredCode.length != 6) { setState(() => _error = 'Enter the 6-digit code'); return; }
 
     setState(() { _loading = true; _error = null; });
-    final r = await ApiService.verifyOtp(_phone.text.trim(), code);
+    final r = await ApiService.verifySignupOtp(_email.text.trim(), _enteredCode);
     if (!mounted) return;
     setState(() => _loading = false);
     if (r.success) {
       _nextStep();
     } else {
-      setState(() => _error = r.error ?? 'Invalid OTP');
+      setState(() => _error = r.error ?? 'That code is not valid');
     }
   }
 
-    Future<void> _finish() async {
+  Future<void> _finish() async {
     if (_email.text.trim().isEmpty || !_email.text.contains('@')) { setState(() => _error = 'Enter a valid email address'); return; }
     if (_pass.text.length < 8) { setState(() => _error = 'Password must be at least 8 characters'); return; }
     if (_pass.text != _conf.text) { setState(() => _error = 'Passwords don\'t match'); return; }
@@ -111,9 +131,10 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
     final r = await ApiService.signup(
       fullName: _name.text.trim(),
       phone: _phone.text.trim(),
+      email: _email.text.trim(),
       cnic: _cnic.text.trim(),
       password: _pass.text,
-      email: _email.text.trim(),
+      otp: _enteredCode,
       role: widget.role,
       stationId: widget.role == 'owner' ? _selectedStationId : null,
     );
@@ -128,7 +149,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
         transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
       ), (_) => false);
     } else {
-      setState(() => _error = r.error);
+      setState(() => _error = r.error ?? 'Could not create the account');
     }
   }
 
@@ -185,7 +206,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                     Row(children: [
                       Expanded(
                         child: Text(
-                          _step == 0 ? 'Create your\naccount' : _step == 1 ? 'Verify your\nphone' : 'Set your\npassword',
+                          _step == 0 ? 'Create your\naccount' : _step == 1 ? 'Verify your\nemail' : 'Set your\npassword',
                           style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800, height: 1.1, letterSpacing: -0.8),
                         ),
                       ),
@@ -205,7 +226,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                     const SizedBox(height: 10),
                     Text(
                       _step == 0 ? 'Enter your details to get started'
-                          : _step == 1 ? 'OTP sent to +92${_phone.text.length > 1 ? _phone.text.substring(1) : _phone.text}'
+                          : _step == 1 ? 'We emailed a 6-digit code to ${_email.text.trim()}'
                           : 'Choose a strong password to protect your account',
                       style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 14, height: 1.5),
                     ),
@@ -230,13 +251,28 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                     if (_step == 1) ..._buildStep1(),
                     if (_step == 2) ..._buildStep2(),
                     const SizedBox(height: 32),
+                    if (_step == 1 && _devOtp != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF10B981).withOpacity(0.25)),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.mark_email_read_outlined, color: Color(0xFF10B981), size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text('Demo mode - your code is $_devOtp',
+                              style: const TextStyle(color: Color(0xFF10B981), fontSize: 13, fontWeight: FontWeight.w600))),
+                        ]),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
                     if (_step == 1) ...[
                       Center(child: TextButton(
-                        onPressed: _loading ? null : () {
-                          for (var c in _otp) c.clear();
-                          setState(() { _step = 0; _error = null; });
-                        },
-                        child: Text('Didn\'t receive OTP? Resend', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13)),
+                        onPressed: _loading ? null : _resendOtp,
+                        child: Text('Didn\'t receive it? Send again', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13)),
                       )),
                       const SizedBox(height: 8),
                     ],
@@ -253,7 +289,7 @@ class _SignupScreenState extends State<SignupScreen> with TickerProviderStateMix
                         child: _loading
                             ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
                             : Text(
-                                _step == 0 ? 'Send OTP' : _step == 1 ? 'Verify & Continue' : 'Create Account',
+                                _step == 0 ? 'Email me a code' : _step == 1 ? 'Verify & Continue' : 'Create Account',
                                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white),
                               ),
                       ),

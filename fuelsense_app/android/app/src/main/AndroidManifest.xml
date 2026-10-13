@@ -6,10 +6,15 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
     <uses-permission android:name="android.permission.CALL_PHONE"/>
 
+    <!-- The FuelSense backend is served over plain HTTP on the local network
+         while developing. Android blocks cleartext traffic from API 28 onwards
+         unless the app opts in, which makes every API call fail with a network
+         error. Remove this once the backend is reachable over HTTPS. -->
     <application
         android:label="FuelSense"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
